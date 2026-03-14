@@ -11,10 +11,10 @@ interface LoginProps {
 export default function Login({ onLogin }: LoginProps) {
   const [accessKey, setAccessKey] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    // Проверяем localStorage только на клиенте
     if (typeof window !== 'undefined') {
       const storedKey = localStorage.getItem('voxa_access_key')
       if (storedKey) {
@@ -25,11 +25,33 @@ export default function Login({ onLogin }: LoginProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const generateAccessKey = () => {
+  const generateAccessKey = async () => {
+    setIsGenerating(true)
+    setError('')
+
+    // Генерация 32-символьного ключа
     const array = new Uint8Array(32)
     crypto.getRandomValues(array)
     const key = Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('')
+
+    // Создание записи в таблице profiles
+    const { data, error: insertError } = await supabase
+      .from('profiles')
+      .insert({ access_key: key })
+      .select('id')
+      .single()
+
+    if (insertError) {
+      console.error(insertError)
+      setError('Failed to generate access key. Please try again.')
+      setIsGenerating(false)
+      return
+    }
+
     setAccessKey(key)
+    setIsGenerating(false)
+    // Не логиним автоматически – пользователь должен нажать "Enter Voxa",
+    // но ключ уже вставлен в поле ввода.
   }
 
   const handleLoginWithKey = async (key: string) => {
@@ -49,10 +71,10 @@ export default function Login({ onLogin }: LoginProps) {
       return
     }
 
-    // Store valid key
+    // Сохраняем ключ в localStorage
     localStorage.setItem('voxa_access_key', key)
 
-    // Update online status
+    // Обновляем статус онлайн
     await supabase
       .from('profiles')
       .update({ is_online: true, last_seen: new Date().toISOString() })
@@ -78,9 +100,10 @@ export default function Login({ onLogin }: LoginProps) {
         <div className="space-y-4">
           <button
             onClick={generateAccessKey}
-            className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+            disabled={isGenerating}
+            className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors disabled:opacity-50"
           >
-            <Key size={20} />
+            {isGenerating ? <Loader2 className="animate-spin" size={20} /> : <Key size={20} />}
             Generate Access Key
           </button>
 
