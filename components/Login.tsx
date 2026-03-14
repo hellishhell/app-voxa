@@ -22,36 +22,48 @@ export default function Login({ onLogin }: LoginProps) {
         handleLoginWithKey(storedKey)
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const generateAccessKey = async () => {
     setIsGenerating(true)
     setError('')
 
-    // Генерация 32-символьного ключа
-    const array = new Uint8Array(32)
-    crypto.getRandomValues(array)
-    const key = Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    try {
+      // Генерация 32-символьного ключа
+      const array = new Uint8Array(32)
+      crypto.getRandomValues(array)
+      const key = Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('')
 
-    // Создание записи в таблице profiles
-    const { data, error: insertError } = await supabase
-      .from('profiles')
-      .insert({ access_key: key })
-      .select('id')
-      .single()
+      // Вставка записи в profiles
+      const { data, error: insertError } = await supabase
+        .from('profiles')
+        .insert({ access_key: key })
+        .select('id')
+        .single()
 
-    if (insertError) {
-      console.error(insertError)
-      setError('Failed to generate access key. Please try again.')
+      if (insertError) {
+        console.error('Insert error:', insertError)
+        // Показываем понятное сообщение в зависимости от кода ошибки
+        if (insertError.code === '23505') {
+          setError('Generated key already exists. Please try again.')
+        } else if (insertError.code === '42501') {
+          setError('Permission denied. Check RLS policies in Supabase.')
+        } else if (insertError.code === '23502') {
+          setError('Missing required field (e.g., username). Please add a default value or make it nullable.')
+        } else {
+          setError(`Failed: ${insertError.message}`)
+        }
+        setIsGenerating(false)
+        return
+      }
+
+      setAccessKey(key)
+    } catch (err) {
+      console.error(err)
+      setError('An unexpected error occurred.')
+    } finally {
       setIsGenerating(false)
-      return
     }
-
-    setAccessKey(key)
-    setIsGenerating(false)
-    // Не логиним автоматически – пользователь должен нажать "Enter Voxa",
-    // но ключ уже вставлен в поле ввода.
   }
 
   const handleLoginWithKey = async (key: string) => {
@@ -71,10 +83,8 @@ export default function Login({ onLogin }: LoginProps) {
       return
     }
 
-    // Сохраняем ключ в localStorage
     localStorage.setItem('voxa_access_key', key)
 
-    // Обновляем статус онлайн
     await supabase
       .from('profiles')
       .update({ is_online: true, last_seen: new Date().toISOString() })
